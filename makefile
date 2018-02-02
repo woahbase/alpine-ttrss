@@ -84,7 +84,7 @@ stop :
 	docker stop -t 2 docker_$(SVCNAME)
 
 test :
-	docker run --rm -it $(NAMEFLAGS) $(RUNFLAGS) $(PORTFLAGS) $(MOUNTFLAGS) $(OTHERFLAGS) $(IMAGETAG) sh -ec 'nginx -v; php --version; echo "$$(cat /opt/ttrss/version)";'
+	docker run --rm -it $(NAMEFLAGS) $(RUNFLAGS) $(PORTFLAGS) $(MOUNTFLAGS) $(OTHERFLAGS) $(IMAGETAG) sh -ec 'nginx -v; php --version;'
 
 # -- }}}
 
