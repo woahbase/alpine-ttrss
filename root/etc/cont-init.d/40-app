@@ -1,0 +1,17 @@
+#!/usr/bin/with-contenv bash
+
+# application specific configurations
+
+if [ ! -e /config/www/ttrss/index.php ]; then
+    mkdir -p /config/www/ttrss/;
+    tar -xzf ${TTRSS_SRC} -C /config/www/ttrss --strip-components=1
+    # cp /defaults/config.php ${TTRSS_INSTALL}/config.php # instead run install on startup
+    echo "Setup Tiny Tiny RSS";
+else
+    echo "Found previous Tiny Tiny RSS dir";
+fi
+
+# permissions
+chown -R alpine:alpine \
+    /config \
+    /var/tmp/nginx
