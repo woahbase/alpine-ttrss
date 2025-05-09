@@ -1,0 +1,297 @@
+#!/usr/bin/with-contenv bash
+set -e
+
+vecho () { if [ "${S6_VERBOSITY:-1}" -gt 0 ]; then echo "[$0] $@"; fi; }
+
+# application specific configurations
+
+ROOTDIR="${ROOTDIR:-/config}";
+WEBDIR="${WEBDIR:-$ROOTDIR/www}"
+
+TTRSSDIR="${TTRSSDIR:-$WEBDIR/ttrss}"; # note: no ending /
+TTRSSCONFIG="${TTRSSCONFIG:-/defaults/config.php}"; # mount your custom config.php here
+
+TTRSS_DB_NAME="${TTRSS_DB_NAME:-ttrss}";
+TTRSS_DB_HOST="${TTRSS_DB_HOST:-pgsql}";
+TTRSS_DB_USER="${TTRSS_DB_USER:-ttrss}";
+# TTRSS_DB_PASS="${TTRSS_DB_PASS:-insecurebydefault}"; # unset by default, required to connect to db
+
+vecho "Ensure configuration directories exist";
+mkdir -p \
+    "${TTRSSDIR}" \
+    "${TTRSSDIR}/config.d" \
+    "${TTRSSDIR}/sql/post-init.d" \
+    ;
+
+if [ ! -f "${TTRSSDIR}/index.php" ];
+then
+    vecho "Setting up Tiny-Tiny RSS $(cat /opt/ttrss/version) at ${TTRSSDIR}";
+    tar -xzf "${TTRSSSRC}" \
+        -C "${TTRSSDIR}" \
+        --strip-components=1;
+    cp "/opt/ttrss/version" "${TTRSSDIR}/version_static.txt";
+else
+    vecho "Tiny-Tiny RSS installation found at ${TTRSSDIR}";
+    if [ -n "${TTRSSUPDATE}" ] \
+    && [ "$(cat ${TTRSSDIR}/version_static.txt)" != "$(cat /opt/ttrss/version)" ];
+    then
+        # backup current installation in $WEBDIR
+        tar -czf \
+            "${WEBDIR}/ttrss-backup-$(date -I).tar.gz" \
+            -C "${TTRSSDIR}" \
+            .;
+        vecho "Tiny-Tiny RSS installation backed up to ${WEBDIR}/ttrss-backup-$(date -I).tar.gz";
+        # then update from src packed in the image
+        tar -xzf "${TTRSSSRC}" \
+            -C "${TTRSSDIR}" \
+            --strip-components=1 \
+            --exclude=ttrss-*/cache/ \
+            --exclude=ttrss-*/lock/ \
+            --exclude=ttrss-*/feed-icons/ \
+            --exclude=ttrss-*/plugins/af_comics/filters.local/ \
+            --exclude=ttrss-*/plugins.local/ \
+            --exclude=ttrss-*/templates.local/ \
+            --exclude=ttrss-*/themes.local/ \
+            ;
+        cp "/opt/ttrss/version" "${TTRSSDIR}/version_static.txt";
+        vecho "Tiny-Tiny RSS installation updated to $(cat /opt/ttrss/version)";
+    elif [ "$(cat ${TTRSSDIR}/version_static.txt)" != "$(cat /opt/ttrss/version)" ];
+    then
+        echo "**************************************************";
+        echo "* Running version: $(cat ${TTRSSDIR}/version_static.txt) ";
+        echo "* Latest  version: $(cat /opt/ttrss/version)      ";
+        echo "* To upgrade, Set TTRSSUPDATE=1 in environment.   ";
+        echo "**************************************************";
+    fi;
+fi;
+
+vecho "Ensure cache/lock/local directories exist";
+mkdir -p \
+    "${TTRSSDIR}/cache/export" \
+    "${TTRSSDIR}/cache/feeds" \
+    "${TTRSSDIR}/cache/images" \
+    "${TTRSSDIR}/cache/upload" \
+    "${TTRSSDIR}/lock" \
+    "${TTRSSDIR}/feed-icons" \
+    "${TTRSSDIR}/plugins.local" \
+    "${TTRSSDIR}/themes.local" \
+    "${TTRSSDIR}/templates.local" \
+    ;
+
+if [ -n "${TTRSSCONFIG}" ] \
+&& [ -f "${TTRSSCONFIG}" ] \
+&& [ ! -f "${TTRSSDIR}/config.php" ]; \
+then
+    vecho "Copying ${TTRSSCONFIG} at ${TTRSSDIR}/config.php";
+    cp "${TTRSSCONFIG}" "${TTRSSDIR}/config.php"; # unset to run app-install scripts on first-run
+
+    # if using the default config, ensure config.d exists
+    # mkdir -p "${TTRSSDIR}/config.d";
+    # vecho "${TTRSSCONFIG} will source variables TTRSS_*";
+    # vecho "as well as files from ${TTRSSDIR}/config.d/*.php";
+# else
+#     vecho "Tiny-Tiny RSS config.php found";
+fi
+
+# fix permissions
+vecho "Fixing permissions.";
+find "${TTRSSDIR}" \
+    \! -user ${S6_USER:-alpine} -exec \
+    chown --no-dereference \
+    ${S6_USER:-alpine}:${PGID:-1000} \
+    '{}' +;
+
+if [ -f "${TTRSSDIR}/config.php" ];
+then
+    chmod 644 "${TTRSSDIR}/config.php";
+fi;
+
+# from https://git.tt-rss.org/fox/tt-rss.git/tree/.docker/app/startup.sh
+for d in cache lock feed-icons;
+do
+    vecho "Fixing permissions for ${TTRSSDIR}/$d";
+    chmod 777 "${TTRSSDIR}/$d";
+    find "${TTRSSDIR}/$d" -type f -exec chmod 666 {} \;
+done;
+
+if [ ! -z "${XDEBUG_ENABLED}" ];
+then
+    if [ -z "${XDEBUG_HOST}" ]; then export XDEBUG_HOST="$(ip ro sh 0/0 | cut -d " " -f 3)"; fi;
+    vecho "Enabling xdebug with the following parameters:";
+    env | grep "XDEBUG";
+    cat > "${PHPCONFDIR}/50_xdebug.ini" <<-EOF
+zend_extension=xdebug.so
+xdebug.mode=debug
+xdebug.start_with_request = yes
+xdebug.client_port = ${XDEBUG_PORT:-9000}
+xdebug.client_host = ${XDEBUG_HOST}
+EOF
+fi;
+
+# We don't need those here (HTTP_HOST would cause false SELF_URL_PATH check failures)
+# unset HTTP_PORT;
+# unset HTTP_HOST;
+update-ca-certificates || true;
+
+# git is not included by default,
+# pass it at runtime in S6_NEEDED_PACKAGES when local plugin updates is required
+if which git \
+&& [ -z "${NO_STARTUP_PLUGIN_UPDATES}" ];
+then
+    vecho "Updating all local plugins...";
+    find "${TTRSSDIR}/plugins.local" -mindepth 1 -maxdepth 1 -type d \
+    | while read PLUGIN;
+    do
+        if [ -d "${PLUGIN}/.git" ];
+        then
+            vecho "Updating ${PLUGIN}...";
+            cd "${PLUGIN}" \
+                && s6-setuidgid ${S6_USER:-alpine} git config core.filemode false \
+                && s6-setuidgid ${S6_USER:-alpine} git config pull.rebase false \
+                && s6-setuidgid ${S6_USER:-alpine} git pull origin master \
+                || vecho "warning: attempt to update plugin ${PLUGIN} failed.";
+        else
+            vecho "Not a repository: ${PLUGIN}";
+        fi;
+    done;
+# else
+#     vecho "Skipping local plugin updates, disabled.";
+fi;
+
+vecho "Waiting for ${TTRSS_DB_TYPE} (database \"${TTRSS_DB_NAME}\", as user ${TTRSS_DB_USER})";
+ret=6; # wait for upto 5x6=30 seconds
+
+# db-tasks that are different for mysql/pgsql go inside the block
+if [ "${TTRSS_DB_TYPE}" == "pgsql" ];
+then
+    TTRSS_DB_PORT="${TTRSS_DB_PORT:-5432}";
+
+    export PGPORT=${TTRSS_DB_PORT};
+    # export PGUSER="${TTRSS_DB_USER}";
+    export PGPASSWORD="${TTRSS_DB_PASS}";
+
+    # block until database ready
+    until pg_isready -h "${TTRSS_DB_HOST}" -p ${TTRSS_DB_PORT} -U "${TTRSS_DB_USER}" -d "${TTRSS_DB_NAME}" -t 1;
+    do
+        if [[ ret -eq 0 ]];
+        then
+            vecho "Could not connect to ${TTRSS_DB_TYPE} (database \"${TTRSS_DB_NAME}\"). Exiting.";
+            exit 1;
+        fi;
+        sleep 5;
+        ((ret--));
+    done;
+    vecho "Found ${TTRSS_DB_TYPE} (database \"${TTRSS_DB_NAME}\")";
+
+    _pg="${PGSQL_BINARY:-psql}";
+    _psql="${_pg} -q -h ${TTRSS_DB_HOST} -p ${TTRSS_DB_PORT} -U ${TTRSS_DB_USER} ${TTRSS_DB_NAME}";
+
+    vecho "Ensure pg_trgm extension exists.";
+    s6-setuidgid ${S6_USER:-alpine} \
+        ${_psql} \
+        -c "create extension if not exists pg_trgm";
+
+elif [ "${TTRSS_DB_TYPE}" == "mysql" ];
+then
+    TTRSS_DB_PORT="${TTRSS_DB_PORT:-3306}";
+    export MYSQL_TCP_PORT="${TTRSS_DB_PORT}";
+
+    _myadmin="${MYSQL_ADMIN:-mariadb-admin}"; # previously mysqladmin
+    until ${_myadmin} ping -h "${TTRSS_DB_HOST}" -P ${TTRSS_DB_PORT} --user="${TTRSS_DB_USER}" --password="${TTRSS_DB_PASS}";
+    do
+        if [[ ret -eq 0 ]];
+        then
+            vecho "Could not connect to ${TTRSS_DB_TYPE} (host \"${TTRSS_DB_HOST}\"). Exiting.";
+            exit 1;
+        fi;
+        sleep 5;
+        ((ret--));
+    done;
+    vecho "Found ${TTRSS_DB_TYPE} (database \"${TTRSS_DB_NAME}\")";
+
+    _my="${MYSQL_BINARY:-mysql}"; # or mariadb
+    _mysql="${_my} -h ${TTRSS_DB_HOST} -P ${TTRSS_DB_PORT} --user=${TTRSS_DB_USER} --password=${TTRSS_DB_PASS} --database=${TTRSS_DB_NAME}";
+
+else
+    vecho "Database type ${TTRSS_DB_TYPE} is unsupported. Exiting.";
+    exit 1;
+fi
+
+# db-tasks that are common for mysql/pgsql go here
+if [ -z "${NO_STARTUP_SCHEMA_UPDATES}" ]; # set to `true` to skip, not recommended unless you know what you're doing
+then
+    vecho "Updating database schema.";
+    s6-setuidgid ${S6_USER:-alpine} \
+        "${TTRSS_PHP_EXECUTABLE}" "${TTRSSDIR}/update.php" \
+            --update-schema=force-yes;
+fi;
+
+if [ ! -z "${ADMIN_USER_PASS}" ];
+then
+    vecho "Setting admin password.";
+    s6-setuidgid ${S6_USER:-alpine} \
+        "${TTRSS_PHP_EXECUTABLE}" "${TTRSSDIR}/update.php" \
+            --user-set-password "admin:${ADMIN_USER_PASS}";
+else
+    if s6-setuidgid ${S6_USER:-alpine} \
+        "${TTRSS_PHP_EXECUTABLE}" "${TTRSSDIR}/update.php" \
+            --user-check-password "admin:password";
+    then
+        RANDOM_PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16 ; echo '');
+        echo "****************************************************************************";
+        echo "* Setting initial built-in admin user password to '$RANDOM_PASS'            ";
+        echo "* If you want to set it manually, use ADMIN_USER_PASS environment variable. ";
+        echo "****************************************************************************";
+        s6-setuidgid ${S6_USER:-alpine} \
+            "${TTRSS_PHP_EXECUTABLE}" "${TTRSSDIR}/update.php" \
+                --user-set-password "admin:${RANDOM_PASS}";
+    fi;
+fi;
+
+if [ ! -z "${ADMIN_USER_ACCESS_LEVEL}" ];
+then
+    vecho "Setting admin access-level.";
+    s6-setuidgid ${S6_USER:-alpine} \
+        "${TTRSS_PHP_EXECUTABLE}" "${TTRSSDIR}/update.php" \
+            --user-set-access-level "admin:$ADMIN_USER_ACCESS_LEVEL";
+fi;
+
+if [ ! -z "${AUTO_CREATE_USER}" ];
+then
+    vecho "Auto-creating user.";
+    s6-setuidgid ${S6_USER:-alpine} /bin/bash -c \
+        "${TTRSS_PHP_EXECUTABLE} ${TTRSSDIR}/update.php --user-exists ${AUTO_CREATE_USER} || ${TTRSS_PHP_EXECUTABLE} ${TTRSSDIR}/update.php --force-yes --user-add \"${AUTO_CREATE_USER}:${AUTO_CREATE_USER_PASS}:${AUTO_CREATE_USER_ACCESS_LEVEL}\"";
+
+    if [ ! -z "${AUTO_CREATE_USER_ENABLE_API}" ];
+    then
+        vecho "Setting API-access for auto-created user.";
+        # TODO: remove || true later
+        s6-setuidgid ${S6_USER:-alpine} /bin/bash -c \
+            "${TTRSS_PHP_EXECUTABLE} ${TTRSSDIR}/update.php --user-enable-api \"${AUTO_CREATE_USER}:${AUTO_CREATE_USER_ENABLE_API}\"" \
+            || true;
+    fi;
+fi;
+
+# unset ADMIN_USER_PASS;
+# unset AUTO_CREATE_USER_PASS;
+
+# db-tasks that are different for mysql/pgsql go inside the block
+if [ "${TTRSS_DB_TYPE}" == "pgsql" ];
+then
+    find "${TTRSSDIR}/sql/post-init.d/" -type f -name '*.sql' \
+    | while read F; do
+        vecho "Applying ${TTRSS_DB_TYPE} patch file: ${F}";
+        s6-setuidgid ${S6_USER:-alpine} \
+            ${_psql} -f "${F}";
+    done;
+elif [ "${TTRSS_DB_TYPE}" == "mysql" ];
+then
+    find "${TTRSSDIR}/sql/post-init.d/" -type f -name '*.sql' \
+    | while read F; do
+        vecho "Applying ${TTRSS_DB_TYPE} patch file: ${F}";
+        s6-setuidgid ${S6_USER:-alpine} /bin/bash -c \
+            "${_mysql} < \"${F}\"";
+    done;
+fi;
+
+vecho "Done";

@@ -1,0 +1,17 @@
+#!/usr/bin/with-contenv bash
+set -e
+
+PHPMAJMIN="${PHPMAJMIN:-81}"; # set in alpine-php Dockerfile
+ROOTDIR="${ROOTDIR:-/config}";
+WEBDIR="${WEBDIR:-$ROOTDIR/www}"
+TTRSSDIR="${TTRSSDIR:-$WEBDIR/ttrss}"; # note: no ending /
+# TTRSS_WORKER_ARGS="";
+
+cd ${TTRSSDIR} || exit 1;
+
+s6-setuidgid ${S6_USER:-alpine} \
+exec \
+    php${PHPMAJMIN} \
+    ${TTRSSDIR}/update_daemon2.php \
+    ${TTRSS_WORKER_ARGS} \
+    >/dev/stdout 2>/dev/stderr;

@@ -1,0 +1,85 @@
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+
+    root WEBDIR;
+    index index.html index.htm index.php;
+
+    server_name _http;
+
+    charset utf-8;
+
+    error_page 500 502 503 504  /50x.html;
+    location = /50x.html { root   /var/lib/nginx/html; }
+
+    client_max_body_size 0;
+
+    location / { try_files $uri $uri/ /index.html =404; }
+
+    # Regular PHP handling (without PATH_INFO)
+    location ~ \.php$ {
+        #Prevents autofixing of path which could be used for exploit
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        # Check that the PHP script exists before passing it
+        try_files $fastcgi_script_name =404;
+        # With php5-cgi alone:
+        # fastcgi_pass 127.0.0.1:9000;
+        # With php5-fpm:
+        fastcgi_pass unix:/var/run/php-fpm.sock;
+        fastcgi_index index.php;
+        include NGINX_FASTCGI_PARAMSFILE;
+        fastcgi_param   SCRIPT_FILENAME    $document_root$fastcgi_script_name;
+        fastcgi_param   SCRIPT_NAME        $fastcgi_script_name;
+    }
+
+    # Allow PATH_INFO for PHP files in plugins.local directories with an /api/ sub directory to allow plugins to leverage when desired
+    location ~ /plugins\.local/.*/api/.*\.php(/|$) {
+        # regex to split $uri to $fastcgi_script_name and $fastcgi_path
+        fastcgi_split_path_info ^(.+?\.php)(/.*)$;
+
+        # Check that the PHP script exists before passing it
+        try_files $fastcgi_script_name =404;
+
+        # Bypass the fact that try_files resets $fastcgi_path_info
+        # see: http://trac.nginx.org/nginx/ticket/321
+        set $path_info $fastcgi_path_info;
+        fastcgi_param PATH_INFO $path_info;
+
+        fastcgi_index index.php;
+        include NGINX_FASTCGI_PARAMSFILE;
+        fastcgi_param   SCRIPT_FILENAME    $document_root$fastcgi_script_name;
+        fastcgi_param   SCRIPT_NAME        $fastcgi_script_name;
+        # With php5-cgi alone:
+        # fastcgi_pass 127.0.0.1:9000;
+        # With php5-fpm:
+        fastcgi_pass unix:/var/run/php-fpm.sock;
+    }
+
+    location /cache {
+        aio threads;
+        internal;
+    }
+
+    location = /ttrss/config.php { deny all; }
+
+    location = /favicon.ico {
+        log_not_found off;
+        access_log off;
+    }
+
+    location = /robots.txt {
+        allow all;
+        log_not_found off;
+        access_log off;
+    }
+
+    # Deny access to any files with a .php extension in the uploads directory
+    # Works in sub-directory installs and also in multisite network
+    location ~* /(?:uploads|files)/.*\.php$ { deny all; }
+
+    location /backups { internal; }
+    location ~ /(data|conf|bin|inc)/ { deny all; }
+
+    # Prevent access to . files (excent the well-known directory)
+    location ~ /\.(?!well-known) { deny all; }
+}

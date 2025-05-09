@@ -1,5 +1,0 @@
-#!/usr/bin/with-contenv bash
-
-# needs config.php to work
-s6-setuidgid alpine php7 /config/www/ttrss/update_daemon2.php > /config/log/update-feeds.log 2>&1
-
