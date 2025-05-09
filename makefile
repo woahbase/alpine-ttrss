@@ -22,9 +22,9 @@ IMAGETAG  ?= $(REGISTRY)/$(ORGNAME)/$(REPONAME):$(ARCH)
 CNTNAME   := docker_$(SVCNAME)
 CNTSHELL  := /bin/bash
 
-# VERSION   ?= master
+VERSION   ?= master
     # checks out the latest master
-VERSION   ?= 0e4b8bd65
+# VERSION   ?= 0e4b8bd65
     # for both mysql and pgsql support (schema v149)
     # last commit on @master that has both mysql and pgsql schemas
     # LMK if you find one that's more recent
@@ -37,7 +37,6 @@ TESTCMD   := \
 	echo "TTRSS version: $$(cat /opt/ttrss/version)"; \
 	#
 
-# SKIP_VERSIONTAG := 1
 # -- }}}
 
 # {{{ -- flags

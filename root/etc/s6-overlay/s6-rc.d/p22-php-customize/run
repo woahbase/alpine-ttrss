@@ -191,26 +191,26 @@ then
         ${_psql} \
         -c "create extension if not exists pg_trgm";
 
-elif [ "${TTRSS_DB_TYPE}" == "mysql" ];
-then
-    TTRSS_DB_PORT="${TTRSS_DB_PORT:-3306}";
-    export MYSQL_TCP_PORT="${TTRSS_DB_PORT}";
-
-    _myadmin="${MYSQL_ADMIN:-mariadb-admin}"; # previously mysqladmin
-    until ${_myadmin} ping -h "${TTRSS_DB_HOST}" -P ${TTRSS_DB_PORT} --user="${TTRSS_DB_USER}" --password="${TTRSS_DB_PASS}";
-    do
-        if [[ ret -eq 0 ]];
-        then
-            vecho "Could not connect to ${TTRSS_DB_TYPE} (host \"${TTRSS_DB_HOST}\"). Exiting.";
-            exit 1;
-        fi;
-        sleep 5;
-        ((ret--));
-    done;
-    vecho "Found ${TTRSS_DB_TYPE} (database \"${TTRSS_DB_NAME}\")";
-
-    _my="${MYSQL_BINARY:-mysql}"; # or mariadb
-    _mysql="${_my} -h ${TTRSS_DB_HOST} -P ${TTRSS_DB_PORT} --user=${TTRSS_DB_USER} --password=${TTRSS_DB_PASS} --database=${TTRSS_DB_NAME}";
+# elif [ "${TTRSS_DB_TYPE}" == "mysql" ];
+# then
+#     TTRSS_DB_PORT="${TTRSS_DB_PORT:-3306}";
+#     export MYSQL_TCP_PORT="${TTRSS_DB_PORT}";
+#
+#     _myadmin="${MYSQL_ADMIN:-mariadb-admin}"; # previously mysqladmin
+#     until ${_myadmin} ping -h "${TTRSS_DB_HOST}" -P ${TTRSS_DB_PORT} --user="${TTRSS_DB_USER}" --password="${TTRSS_DB_PASS}";
+#     do
+#         if [[ ret -eq 0 ]];
+#         then
+#             vecho "Could not connect to ${TTRSS_DB_TYPE} (host \"${TTRSS_DB_HOST}\"). Exiting.";
+#             exit 1;
+#         fi;
+#         sleep 5;
+#         ((ret--));
+#     done;
+#     vecho "Found ${TTRSS_DB_TYPE} (database \"${TTRSS_DB_NAME}\")";
+#
+#     _my="${MYSQL_BINARY:-mysql}"; # or mariadb
+#     _mysql="${_my} -h ${TTRSS_DB_HOST} -P ${TTRSS_DB_PORT} --user=${TTRSS_DB_USER} --password=${TTRSS_DB_PASS} --database=${TTRSS_DB_NAME}";
 
 else
     vecho "Database type ${TTRSS_DB_TYPE} is unsupported. Exiting.";
@@ -284,14 +284,14 @@ then
         s6-setuidgid ${S6_USER:-alpine} \
             ${_psql} -f "${F}";
     done;
-elif [ "${TTRSS_DB_TYPE}" == "mysql" ];
-then
-    find "${TTRSSDIR}/sql/post-init.d/" -type f -name '*.sql' \
-    | while read F; do
-        vecho "Applying ${TTRSS_DB_TYPE} patch file: ${F}";
-        s6-setuidgid ${S6_USER:-alpine} /bin/bash -c \
-            "${_mysql} < \"${F}\"";
-    done;
+# elif [ "${TTRSS_DB_TYPE}" == "mysql" ];
+# then
+#     find "${TTRSSDIR}/sql/post-init.d/" -type f -name '*.sql' \
+#     | while read F; do
+#         vecho "Applying ${TTRSS_DB_TYPE} patch file: ${F}";
+#         s6-setuidgid ${S6_USER:-alpine} /bin/bash -c \
+#             "${_mysql} < \"${F}\"";
+#     done;
 fi;
 
 vecho "Done";

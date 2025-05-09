@@ -25,7 +25,7 @@ RUN set -xe \
         ca-certificates \
         git \
         # libxslt \
-        mysql-client \
+        # mysql-client \
         postgresql-client \
         tzdata \
 #
@@ -40,17 +40,16 @@ RUN set -xe \
         php${PHPMAJMIN}-intl \
         php${PHPMAJMIN}-json \
         php${PHPMAJMIN}-mbstring \
-        php${PHPMAJMIN}-mysqli \
-        php${PHPMAJMIN}-mysqlnd \
+        # php${PHPMAJMIN}-mysqli \
+        # php${PHPMAJMIN}-mysqlnd \
         php${PHPMAJMIN}-opcache \
         php${PHPMAJMIN}-openssl \
         php${PHPMAJMIN}-pcntl \
         php${PHPMAJMIN}-pdo \
-        php${PHPMAJMIN}-pdo_mysql \
+        # php${PHPMAJMIN}-pdo_mysql \
         php${PHPMAJMIN}-pdo_pgsql \
         php${PHPMAJMIN}-pecl-apcu \
         php${PHPMAJMIN}-pecl-xdebug \
-        php${PHPMAJMIN}-pgsql \
         php${PHPMAJMIN}-pgsql \
         php${PHPMAJMIN}-phar \
         php${PHPMAJMIN}-posix \
@@ -77,16 +76,16 @@ RUN set -xe \
     # && curl -o ${TTRSSSRC} -SL "${TTRSSREPO}/archive/${VERSION}.tar.gz" \
 #
 # enable to shallow clone only specific branch e.g. master
-    # && git clone --branch ${VERSION} --depth 1 \
-    #     ${TTRSSREPO}.git \
-    #     /tmp/ttrss-${VERSION}/ \
+    && git clone --branch ${VERSION} --depth 1 \
+        ${TTRSSREPO}.git \
+        /tmp/ttrss-${VERSION}/ \
 #
 # enable to clone whole repo and switch to specific commit
 # (detached head but we don't care, rm-rf-ing .git before packing release anyway)
-    && git clone \
-        ${TTRSSREPO}.git \
-        /tmp/ttrss-${VERSION}/ \
-    && (cd /tmp/ttrss-${VERSION}/ && git checkout ${VERSION}) \
+    # && git clone \
+    #     ${TTRSSREPO}.git \
+    #     /tmp/ttrss-${VERSION}/ \
+    # && (cd /tmp/ttrss-${VERSION}/ && git checkout ${VERSION}) \
 #
     && ( cd /tmp/ttrss-${VERSION} \
         && echo "$(git rev-parse --abbrev-ref HEAD)@$(git rev-parse --short HEAD)" \
@@ -114,10 +113,10 @@ COPY root/ /
 #
 ENV \
     TTRSS_DB_TYPE="pgsql" \
-    TTRSS_MYSQL_CHARSET="UTF8" \
     TTRSS_PHP_EXECUTABLE="/usr/bin/php${PHPMAJMIN}" \
     TTRSS_PLUGINS="auth_internal, note, nginx_xaccel" \
     TTRSS_NGINX_XACCEL_PREFIX=/ttrss
+    # TTRSS_MYSQL_CHARSET="UTF8"
 
 # required at runtime
     # TTRSS_DB_HOST="postgresql"
